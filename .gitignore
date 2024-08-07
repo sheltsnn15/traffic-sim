@@ -1,0 +1,70 @@
+# Ignore build output
+/build/
+/sdkconfig
+/sdkconfig.old
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore CMake specific files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Ignore other temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*.swn
+
+# Ignore generated executables and binaries
+*.elf
+*.bin
+*.hex
+
+# Ignore generated documentation
+/doc/
+
+# Ignore coverage files
+*.gcda
+*.gcno
+*.gcov
+
+# Ignore dependency directories
+/deps/
+/venv/
+
+# Ignore ESP-IDF specific files
+.espressif/
+*.idf.new
+
+# Ignore custom components
+components/**/*.o
+components/**/*.d
+components/**/*.a
+components/**/*.bin
+
+# Ignore user-specific files
+*.user
+
+# Ignore Git specific files
+*.orig
+*.patch
+
+# Ignore secrets (if any)
+secrets.txt
+.env
+*.key
+*.pem
+*.cer
+
+# Ignore Python virtual environments
+venv/
+env/
+
+# Ignore Python testing outputs
+*.pytest_cache/

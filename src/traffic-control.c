@@ -1,15 +1,20 @@
 #include "traffic-control.h"
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
 
-// Function to generate random random traffic data
+static QueueHandle_t uart_queue;
+static unsigned long Input;
+
+// Function to generate random traffic data
 void generateRandomTraffic() {
-  // generate random number between 0 and 3
+  // Generate random number between 0 and 3 (for 4 possible traffic patterns)
   Input = esp_random() % 4;
 }
 
@@ -20,8 +25,9 @@ void printTrafficLightState(const char *junctionType,
   ESP_LOGI(TAG, "Junction Type: %s", junctionType);
   ESP_LOGI(TAG, "Current lights value: 0x%02lX", lightState);
 
+  // Different junctions will have different light setups, so handle each case
   if (strcmp(junctionType, "X-Junction") == 0) {
-    // X-Junction: Focus on North-South and East-West lights only
+    // For X-Junction: Focus on North-South and East-West lights only
     ESP_LOGI(TAG, "North Green Light: %s", (lightState & 0x08) ? "On" : "Off");
     ESP_LOGI(TAG, "North Yellow Light: %s", (lightState & 0x10) ? "On" : "Off");
     ESP_LOGI(TAG, "North Red Light: %s", (lightState & 0x20) ? "On" : "Off");
@@ -31,7 +37,7 @@ void printTrafficLightState(const char *junctionType,
     ESP_LOGI(TAG, "East Red Light: %s", (lightState & 0x04) ? "On" : "Off");
 
   } else if (strcmp(junctionType, "Y-Junction") == 0) {
-    // Y-Junction: Handle North-South and South-East traffic flows
+    // For Y-Junction: Focus on North-South and South-East traffic flows
     ESP_LOGI(TAG, "North Green Light: %s", (lightState & 0x08) ? "On" : "Off");
     ESP_LOGI(TAG, "North Yellow Light: %s", (lightState & 0x10) ? "On" : "Off");
     ESP_LOGI(TAG, "North Red Light: %s", (lightState & 0x20) ? "On" : "Off");
@@ -44,7 +50,7 @@ void printTrafficLightState(const char *junctionType,
              (lightState & 0x01) ? "On" : "Off");
 
   } else if (strcmp(junctionType, "H-Junction") == 0) {
-    // H-Junction: Include North-South lights and Turn Arrow
+    // For H-Junction: North-South lights and Turn Arrow
     ESP_LOGI(TAG, "North Green Light: %s", (lightState & 0x08) ? "On" : "Off");
     ESP_LOGI(TAG, "North Yellow Light: %s", (lightState & 0x10) ? "On" : "Off");
     ESP_LOGI(TAG, "North Red Light: %s", (lightState & 0x20) ? "On" : "Off");
@@ -54,6 +60,7 @@ void printTrafficLightState(const char *junctionType,
     ESP_LOGI(TAG, "East Yellow Light: %s", (lightState & 0x02) ? "On" : "Off");
     ESP_LOGI(TAG, "East Red Light: %s", (lightState & 0x04) ? "On" : "Off");
   } else {
+    // If the junction type is not recognized, log a warning
     ESP_LOGW(TAG, "Unknown junction type: %s", junctionType);
   }
 }
@@ -62,32 +69,52 @@ void printTrafficLightState(const char *junctionType,
 void handleJunctionState(const char *junctionType, unsigned long *currentState,
                          STyp *fsm, unsigned long *oldOutput,
                          unsigned long input) {
+  // Update the state of the traffic light based on the input and FSM
   *currentState = fsm[*currentState].Next[input];
+
+  // If the output state has changed, print the new traffic light state
   if (*currentState != *oldOutput) {
     printTrafficLightState(junctionType, fsm[*currentState].Out);
     *oldOutput = *currentState;
-    vTaskDelay(fsm[*currentState].Time /
-               portTICK_PERIOD_MS); // Delay in FreeRTOS
+    // Introduce a delay between state transitions to simulate real-world timing
+    vTaskDelay(fsm[*currentState].Time / portTICK_PERIOD_MS); // FreeRTOS delay
   }
 }
 
+// UART initialization function
 void uart_init(void) {
-  uart_config_t uart_config = {.baud_rate = UART_BAUD_RATE,
-                               .data_bits = UART_DATA_8_BITS,
-                               .parity = UART_PARITY_DISABLE,
-                               .stop_bits = UART_STOP_BITS_1,
-                               .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
+  // Set UART configuration parameters
+  uart_config_t uart_config = {
+      .baud_rate = UART_BAUD_RATE,          // Set the baud rate
+      .data_bits = UART_DATA_8_BITS,        // 8 data bits
+      .parity = UART_PARITY_DISABLE,        // No parity
+      .stop_bits = UART_STOP_BITS_1,        // 1 stop bit
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE // No hardware flow control
+  };
+  // Configure UART with the settings above
   uart_param_config(UART_PORT_NUM, &uart_config);
+
+  // Set the pins for UART communication (TX and RX)
   uart_set_pin(UART_PORT_NUM, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE,
                UART_PIN_NO_CHANGE);
-  uart_driver_install(UART_PORT_NUM, 1024, 0, 0, NULL, 0);
+
+  // Enable an event-driven queue for UART (manages incoming data)
+  if (uart_driver_install(UART_PORT_NUM, 1024, 0, 10, &uart_queue, 0) !=
+      ESP_OK) {
+    ESP_LOGE(TAG, "Failed to install UART driver");
+  }
 }
 
+// Function to send data over UART
 void uart_send_data(const char *data) {
-  uart_write_bytes(UART_PORT_NUM, data, strlen(data));
+  // Send the data over the UART port
+  int bytes_written = uart_write_bytes(UART_PORT_NUM, data, strlen(data));
+  if (bytes_written < 0) {
+    ESP_LOGE(TAG, "Failed to send data over UART");
+  }
 }
 
-// Traffic light task for multiple junctions
+// Traffic light control task (FreeRTOS task)
 void trafficLightTask(void *pvParameter) {
   // Initial states for each junction type
   state_Y = goN;
@@ -99,39 +126,28 @@ void trafficLightTask(void *pvParameter) {
   unsigned long oldOutput_H = -1;
 
   while (1) {
-    // Simulate input (This will be replaced with SUMO+logic algorithm later)
-    generateRandomTraffic(); // Generate random traffic data
+    // Simulate random input for traffic lights
+    generateRandomTraffic();
 
-    // Handle each junction
-    handleJunctionState("Y-Junction", &state_Y, FSM_Y, &oldOutput_Y, input_Y);
-    /*handleJunctionState("X-Junction", &state_X, FSM_X, &oldOutput_X,
-     * input_X);*/
-    /*handleJunctionState("H-Junction", &state_H, FSM_H, &oldOutput_H,
-     * input_H);*/
+    // Handle state changes for each junction
+    handleJunctionState("Y-Junction", &state_Y, FSM_Y, &oldOutput_Y, Input);
 
-    // Send the state of Y-Junction over UART
+    // Send the current state of Y-Junction over UART
     unsigned long trafficState_Y = FSM_Y[state_Y].Out;
     char buffer[32];
     int len = snprintf(buffer, sizeof(buffer), "Y-Junction State: 0x%lX\n",
                        trafficState_Y);
     uart_send_data(buffer);
 
-    // Send the state of X-Junction over UART
-    /*unsigned long trafficState_X = FSM_X[state_X].Out;*/
-    /*len = snprintf(buffer, sizeof(buffer), "X-Junction State: 0x%lX\n",*/
-    /*               trafficState_X);*/
-    /*uart_send_data(buffer);*/
+    // Clear the UART buffer periodically to avoid overflow
+    if (!uart_wait_tx_done(UART_PORT_NUM, 100 / portTICK_PERIOD_MS)) {
+      uart_flush(UART_PORT_NUM); // Clear UART buffer to prevent overflow
+    }
 
-    // Send the state of H-Junction over UART
-    /*unsigned long trafficState_H = FSM_H[state_H].Out;*/
-    /*len = snprintf(buffer, sizeof(buffer), "H-Junction State: 0x%lX\n",*/
-    /*               trafficState_H);*/
-    /*uart_send_data(buffer);*/
+    // Reset the watchdog timer and yield to other tasks
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 
-    // Reset the watchdog timer and yield
-    vTaskDelay(10 / portTICK_PERIOD_MS); // Ensure the task yields regularly
-
-    // Check remaining stack size for potential stack overflow issues
+    // Check remaining stack size for potential overflow issues
     UBaseType_t remainingStack = uxTaskGetStackHighWaterMark(NULL);
     if (remainingStack < 100) {
       ESP_LOGW(TAG, "Stack is running low: %d words remaining", remainingStack);
@@ -139,9 +155,14 @@ void trafficLightTask(void *pvParameter) {
   }
 }
 
-// Main application
+// Main application entry point
 void app_main() {
-  uart_init(); // Initialize UART
-  // Create the traffic light control task
-  xTaskCreate(&trafficLightTask, "trafficLightTask", 2048, NULL, 5, NULL);
+  // Initialize the UART
+  uart_init();
+
+  // Create the traffic light control task (FreeRTOS task)
+  if (xTaskCreate(&trafficLightTask, "trafficLightTask", 2048, NULL, 5, NULL) !=
+      pdPASS) {
+    ESP_LOGE(TAG, "Failed to create traffic light task");
+  }
 }

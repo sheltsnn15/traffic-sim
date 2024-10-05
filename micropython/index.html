@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traffic Light Status</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+      }
+      .traffic-light {
+        width: 50px;
+        height: 150px;
+        margin: 20px auto;
+        background-color: #333;
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .light {
+        width: 50px;
+        height: 50px;
+        margin-bottom: 10px;
+        border-radius: 50%;
+      }
+      .red {
+        background-color: grey;
+      }
+      .yellow {
+        background-color: grey;
+      }
+      .green {
+        background-color: grey;
+      }
+      .active {
+        background-color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Live Traffic Light Status</h1>
+    <div class="traffic-light">
+      <div id="redLight" class="light red"></div>
+      <div id="yellowLight" class="light yellow"></div>
+      <div id="greenLight" class="light green"></div>
+    </div>
+
+    <script>
+      const redLight = document.getElementById("redLight");
+      const yellowLight = document.getElementById("yellowLight");
+      const greenLight = document.getElementById("greenLight");
+
+      const ws = new WebSocket("ws://{{ESP32-IP}}:80/ws");
+
+      ws.onopen = function () {
+        console.log("Connected to the WebSocket server.");
+      };
+
+      ws.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        updateTrafficLight(data);
+      };
+
+      function updateTrafficLight(state) {
+        // Reset all lights
+        redLight.style.backgroundColor = "grey";
+        yellowLight.style.backgroundColor = "grey";
+        greenLight.style.backgroundColor = "grey";
+
+        // Activate based on state
+        if (state.red) {
+          redLight.style.backgroundColor = "red";
+        }
+        if (state.yellow) {
+          yellowLight.style.backgroundColor = "yellow";
+        }
+        if (state.green) {
+          greenLight.style.backgroundColor = "green";
+        }
+      }
+
+      ws.onclose = function () {
+        console.log("WebSocket connection closed.");
+      };
+    </script>
+  </body>
+</html>
